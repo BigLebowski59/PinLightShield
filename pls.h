@@ -1,10 +1,16 @@
-// pls.h  -  Library for PinLightShield
-// Author: H.Koller, November 2014
-// Change Log:
-// Version 0: initial version
-// Version 1: added support for "unsigned long colors"
-//	      added more useful color conversion functions
-//	      function LightStrip can now be used in 3 variants
+/* -----------------------------------------------------------
+ pls.h  -  Library for PinLightShield
+ Author: H.Koller, November 2014
+ Released into the public domain.
+
+ Change Log:
+ Version 0: initial version
+ Version 1:   added support for "unsigned long colors"
+	      added more useful color conversion functions
+	      added function SwitchOff
+	      function LightStrip can now be used in 3 variants
+	      added function MultiColorFlash
+---------------------------------------------------------------*/
 
 #ifndef pls_h
 #define pls_h
@@ -15,6 +21,8 @@
 void CopyColor(int * destColor, int srcColor[3]);
 unsigned long RGB2Long(byte red, byte green, byte blue);
 void Long2RGB(unsigned long color, byte * red, byte * green, byte * blue);
+void Long2RGB(unsigned long color, int * red, int * green, int * blue);
+void Long2RGB(unsigned long color, int RGB[3]);
 byte GetRed(unsigned long color);
 byte GetGreen(unsigned long color);
 byte GetBlue(unsigned long color);
@@ -33,9 +41,11 @@ class RGBStrip
     void SetBrightness(int brightness);
     void RainbowColorChange(unsigned long CurrentMillis);
     void SetRainbowSpeed(int RainbowSpeed);
+    void SetupMultiColorFlash(byte nrofcolors, unsigned long colors[5], int durations[5], boolean randsequence, int FlashDuration);
+    void MultiColorFlash(unsigned long CurrentMillis, boolean * FlashActive);
     void SetupTwoColorFlash(int color1[3], int color2[3], int Col1Duration, int Col2Duration, int FlashDuration);
     void TwoColorFlash(unsigned long CurrentMillis, boolean * FlashActive);
-    void SetupTwoColorFade(int fadecolorfrom[3], int fadecolorto[3], int fadestep, int fadespeed, int FadeDuration);
+    void SetupTwoColorFade(unsigned long fadecolorfrom, unsigned long fadecolorto, int fadestep, int fadespeed, int FadeDuration);
     void TwoColorFade(unsigned long CurrentMillis, boolean * FadeActive);
   private:
     int _redpin;
@@ -48,6 +58,15 @@ class RGBStrip
     int _rainbowgreen;
     int _fadespeed_rainbow;
     unsigned long _startrainbow;	// remember the time the last rainbow cycle started
+  // variables for MultiColorFlash
+    byte _nrofcolors;
+    unsigned long _colors[5];
+    int _durations[5];
+    boolean _randsequence;
+    int _MultiFlashDuration;
+    unsigned long _MultiFlashStartTime;
+    unsigned long _LastMultiColorSwitch;
+    byte _ActiveColorIndex;
   // variables for TwoColorFlash 
     int _Col1Duration;
     int _color1[3];

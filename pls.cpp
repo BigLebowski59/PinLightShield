@@ -1,10 +1,16 @@
-// pls.cpp  -  Library for PinLightShield
-// Author: H.Koller, November 2014
-// Change Log:
-// Version 0: initial version
-// Version 1: added support for "unsigned long colors"
-//	      added more useful color conversion functions
-//	      function LightStrip can now be used in 3 variants
+/* -----------------------------------------------------------
+ pls.h  -  Library for PinLightShield
+ Author: H.Koller, November 2014
+ Released into the public domain.
+
+ Change Log:
+ Version 0: initial version
+ Version 1:   added support for "unsigned long colors"
+	      added more useful color conversion functions
+	      added function SwitchOff
+	      function LightStrip can now be used in 3 variants
+	      added function MultiColorFlash
+---------------------------------------------------------------*/
 
 #include "Arduino.h"
 #include "Pls.h"
@@ -33,14 +39,30 @@ void Long2RGB(unsigned long color, byte * red, byte * green, byte * blue)
 *blue = byte(color);
 }  
 
+void Long2RGB(unsigned long color, int * red, int * green, int * blue)
+{
+*red = byte(color >> 16);
+*green = byte(color >> 8);
+*blue = byte(color);
+}  
+
+void Long2RGB(unsigned long color, int RGB[3])
+{
+RGB[0] = byte(color >> 16);
+RGB[1] = byte(color >> 8);
+RGB[2] = byte(color);
+}  
+
 byte GetRed(unsigned long color)
 {
 return (color & 0xff0000) >> 16;
 }
+
 byte GetGreen(unsigned long color)
 {
 return (color & 0x00ff00) >> 8;
 }
+
 byte GetBlue(unsigned long color)
 {
 return (color & 0x0000ff);
@@ -70,7 +92,7 @@ _rainbowgreen = 0;
 _startrainbow = 0;
 _fadespeed_rainbow = 7;
 
-LightStrip(0, 0, 0);		// initially always switch it off
+SwitchOff();		// initially always switch it off
 }
 
 // ------------ Functions to light an RGBStrip  ---------------
@@ -104,6 +126,8 @@ LightStrip((unsigned long)0);
 
 // -------- Function to flash the Strip a certain ---------
 // -------- number of times with a certain length ---------
+// Attention: uses delay() function so use only if nothing else can
+//            happen during the call to this function
 
 void RGBStrip::MakeFlashes(unsigned long color, int flashes, int flashlength) 
 {
@@ -180,6 +204,58 @@ if (_fadespeed_rainbow <= 0)
   _fadespeed_rainbow = 1;
 }
 
+void RGBStrip::SetupMultiColorFlash(byte nrofcolors, unsigned long colors[5], int durations[5], boolean                                                randsequence, int FlashDuration)
+{
+int i;
+
+if (nrofcolors > 5)
+  _nrofcolors = 5;
+else
+  _nrofcolors = nrofcolors;
+
+memcpy(_colors, colors, sizeof(_colors));
+memcpy(_durations, durations, sizeof(_durations));
+_randsequence = randsequence;
+_ActiveColorIndex = 0;  // always start with first color in array
+_MultiFlashDuration = FlashDuration;
+_MultiFlashStartTime = 0;
+}
+
+
+void RGBStrip::MultiColorFlash(unsigned long CurrentMillis, boolean * FlashActive)
+{
+if (*FlashActive == false)   // signal detected for the first time
+  {
+  _MultiFlashStartTime = CurrentMillis;
+  _LastMultiColorSwitch = CurrentMillis;
+  *FlashActive = true;
+  }
+else              // we want to make sure, that this lasts for a while to really see some effect
+  {
+  if (CurrentMillis - _MultiFlashStartTime > _MultiFlashDuration)
+    {
+    *FlashActive = false;
+    return;
+    }
+  }
+  
+if (CurrentMillis - _LastMultiColorSwitch >=    // determines the length of the flash               
+    _durations[_ActiveColorIndex])               // (different for each color)
+    {
+    _LastMultiColorSwitch = CurrentMillis;     // store time of last color switch
+    if (_randsequence)
+       _ActiveColorIndex = random(0, _nrofcolors-1);
+    else
+       {
+       _ActiveColorIndex++;                       // switch color
+       if (_ActiveColorIndex > _nrofcolors-1)     // handle overrun
+          _ActiveColorIndex = 0;
+       }
+    }
+
+LightStrip(_colors[_ActiveColorIndex]);
+}
+
 void RGBStrip::SetupTwoColorFlash(int color1[3], int color2[3], 
                                   int Col1Duration, int Col2Duration, int FlashDuration)
 {
@@ -197,6 +273,7 @@ void RGBStrip::TwoColorFlash(unsigned long CurrentMillis, boolean * FlashActive)
 if (*FlashActive == false)   // signal detected for the first time
   {
   _FlashStartTime = CurrentMillis;
+  _LastColorSwitch = CurrentMillis;
   *FlashActive = true;
   }
 else              // we want to make sure, that this lasts for a while to really see some effect
@@ -232,16 +309,21 @@ else
 }
 
 // ============= functions for TwoColorFade ================
-void RGBStrip::SetupTwoColorFade(int fadecolorfrom[3], int fadecolorto[3], int fadestep, int fadespeed, int FadeDuration)
+void RGBStrip::SetupTwoColorFade(unsigned long fadecolorfrom, unsigned long fadecolorto, int fadestep, int fadespeed, int FadeDuration)
 {
 int coldiff[3];
 int i;
 
-CopyColor(_fadecolorfrom, fadecolorfrom);
-CopyColor(_fadecolorto, fadecolorto);
+Long2RGB(fadecolorfrom, _fadecolorfrom);
+Long2RGB(fadecolorto, _fadecolorto);
 
 _fadespeed = fadespeed;   // the speed of the color change
 _FadeDuration = FadeDuration;
+
+if (fadestep < 1)
+  fadestep = 1;
+if (fadestep > 5)
+  fadestep = 5;
 
 for (i=0; i<=2; i++)
   {
@@ -253,14 +335,14 @@ for (i=0; i<=2; i++)
   coldiff[i] = abs(coldiff[i]);
   }
 
-if (coldiff[0] > coldiff[1] && coldiff[0] > coldiff[2])
+if (coldiff[0] >= coldiff[1] && coldiff[0] >= coldiff[2])
   {
   _fadestep[0] = 100 * fadestep;
   _fadestep[1] = 100 * fadestep * coldiff[1]/coldiff[0];
   _fadestep[2] = 100 * fadestep * coldiff[2]/coldiff[0];
   }
 else
-  if (coldiff[1] > coldiff[0] && coldiff[1] > coldiff[2])
+  if (coldiff[1] >= coldiff[0] && coldiff[1] >= coldiff[2])
     {
     _fadestep[1] = 100 * fadestep;
     _fadestep[0] = 100 * fadestep * coldiff[0]/coldiff[1];
@@ -281,14 +363,14 @@ boolean RGBStrip::DetectColorLimit(int color, int fadecolorfrom, int fadecolorto
 {
 if (colordir == +1)
   {
-  if (color >= max(fadecolorfrom, fadecolorto))  // im ansteigen über´s Ziel geschossen
+  if (color > max(fadecolorfrom, fadecolorto))  // im ansteigen über´s Ziel geschossen
     {
     return true;
     }
   }
 else
   {
-  if (color <= min(fadecolorfrom, fadecolorto))  // im ansteigen über´s Ziel geschossen
+  if (color < min(fadecolorfrom, fadecolorto))  // im ansteigen über´s Ziel geschossen
     {
     return true;
     }
@@ -316,6 +398,7 @@ int i;
 if (*FadeActive == false)   // signal detected for the first time
   {
   _FadeStartTime = CurrentMillis;
+  _LastFadeStep = CurrentMillis;
   *FadeActive = true;
   }
 else              // we want to make sure, that this lasts for a while to really see some effect
@@ -333,36 +416,15 @@ if (CurrentMillis - _LastFadeStep >= _fadespeed)    // determines the speed of t
   for (i=0; i<=2; i++)
     _fadecolor[i] = _fadecolor[i] + _fadedir[i] * _fadestep[i];
 
-  if (DetectColorLimit(_fadecolor[0], _fadecolorfrom[0] * 100, _fadecolorto[0] * 100, _fadedir[0]))  // if true then a limit was reached
-    {
+  // if one of the color components reaches the other end, all components are set to the other color
+  // and we continue in the other direction
+  if ((DetectColorLimit(_fadecolor[0], _fadecolorfrom[0] * 100, _fadecolorto[0] * 100, _fadedir[0])) ||  
+      (DetectColorLimit(_fadecolor[1], _fadecolorfrom[1] * 100, _fadecolorto[1] * 100, _fadedir[1])) ||
+      (DetectColorLimit(_fadecolor[2], _fadecolorfrom[2] * 100, _fadecolorto[2] * 100, _fadedir[2])))
     SwitchDir();
-    }
-  else if (DetectColorLimit(_fadecolor[1], _fadecolorfrom[1] * 100, _fadecolorto[1] * 100, _fadedir[1]))
-    {
-    SwitchDir();
-    }
-  else if (DetectColorLimit(_fadecolor[2], _fadecolorfrom[2] * 100, _fadecolorto[2] * 100, _fadedir[2]))
-    {
-    SwitchDir();
-    }
-
-/*  for (i=0; i<=2; i++)
-    {
-    Serial.print(_fadecolor[i]); Serial.print("  ");
-    }
-  Serial.println();
-  delay(250);
-*/
   }
 
 LightStrip(_fadecolor[0]/100, _fadecolor[1]/100, _fadecolor[2]/100);
-}
-
-void Test()
-{
-int i;
-
-i = i *200;
 }
 
 // --------- end of implementation of class RGBStrip ---------
@@ -588,7 +650,7 @@ else
 return inserton;
 }
 
-/* Function to read Inserts that can be ON, OFF or BLINKING
+/* ----------- Function to read Inserts that can be ON, OFF or BLINKING --------
    Return Codes:
 	0:	OFF
 	1:	ON
